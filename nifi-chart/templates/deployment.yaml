@@ -1,0 +1,173 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nifi-chart.fullname" . }}
+  labels:
+    {{- include "nifi-chart.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "nifi-chart.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "nifi-chart.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "nifi-chart.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - mountPath: /opt/nifi/nifi-current/logs
+              {{- if and .Values.persistence.enabled .Values.persistence.subPath.enabled }}
+              name: {{ .Values.persistence.subPath.name }}
+              subPath: logs
+              {{- else }}
+              name: "logs"
+              {{- end }}
+            - mountPath: /opt/nifi/data
+              {{- if and .Values.persistence.enabled .Values.persistence.subPath.enabled }}
+              name: {{ .Values.persistence.subPath.name }}
+              subPath: data
+              {{- else }}
+              name: "data"
+              {{- end }}
+            - mountPath: /opt/nifi/nifi-current/auth-conf/
+              {{- if and .Values.persistence.enabled .Values.persistence.subPath.enabled }}
+              name: {{ .Values.persistence.subPath.name }}
+              subPath: auth-conf
+              {{- else }}
+              name: "auth-conf"
+              {{- end }}
+            - mountPath: /opt/nifi/nifi-current/config-data
+              {{- if and .Values.persistence.enabled .Values.persistence.subPath.enabled }}
+              name: {{ .Values.persistence.subPath.name }}
+              subPath: config-data
+              {{- else }}
+              name: "config-data"
+              {{- end }}
+            - mountPath: /opt/nifi/flowfile_repository
+              {{- if and .Values.persistence.enabled .Values.persistence.subPath.enabled }}
+              name: {{ .Values.persistence.subPath.name }}
+              subPath: flowfile-repository
+              {{- else }}
+              name: "flowfile-repository"
+              {{- end }}
+            - mountPath: /opt/nifi/content_repository
+              {{- if and .Values.persistence.enabled .Values.persistence.subPath.enabled }}
+              name: {{ .Values.persistence.subPath.name }}
+              subPath: content-repository
+              {{- else }}
+              name: "content-repository"
+              {{- end }}
+            - mountPath: /opt/nifi/provenance_repository
+              {{- if and .Values.persistence.enabled .Values.persistence.subPath.enabled }}
+              name: {{ .Values.persistence.subPath.name }}
+              subPath: provenance-repository
+              {{- else }}
+              name: "provenance-repository"
+              {{- end }}
+            - name: "bootstrap-conf"
+              mountPath: /opt/nifi/nifi-current/conf/bootstrap.conf
+              subPath: "bootstrap.conf"
+            - name: "nifi-properties"
+              mountPath: /opt/nifi/nifi-current/conf/nifi.temp
+              subPath: "nifi.temp"
+            - name: "authorizers-temp"
+              mountPath: /opt/nifi/nifi-current/conf/authorizers.temp
+              subPath: "authorizers.temp"
+            - name: "bootstrap-notification-services-xml"
+              mountPath: /opt/nifi/nifi-current/conf/bootstrap-notification-services.xml
+              subPath: "bootstrap-notification-services.xml"
+            - name: "login-identity-providers-ldap-xml"
+              mountPath: /opt/nifi/nifi-current/conf/login-identity-providers-ldap.xml
+              subPath: "login-identity-providers-ldap.xml"
+            - name: "state-management-xml"
+              mountPath: /opt/nifi/nifi-current/conf/state-management.xml
+              subPath: "state-management.xml"
+            - name: "zookeeper-properties"
+              mountPath: /opt/nifi/nifi-current/conf/zookeeper.properties
+              subPath: "zookeeper.properties"
+            - name: "flow-content"
+              mountPath: /opt/nifi/data/flow.xml
+              subPath: "flow.xml"
+            {{- range $secret := .Values.secrets }}
+              {{- if $secret.mountPath }}
+                {{- if $secret.keys }}
+                  {{- range $key := $secret.keys }}
+            - name: {{ include "apache-nifi.fullname" $ }}-{{ $secret.name }}
+              mountPath: {{ $secret.mountPath }}/{{ $key }}
+              subPath: {{ $key }}
+              readOnly: true
+                  {{- end }}
+                {{- else }}
+            - name: {{ include "apache-nifi.fullname" $ }}-{{ $secret.name }}
+              mountPath: {{ $secret.mountPath }}
+              readOnly: true
+                {{- end }}
+              {{- end }}
+            {{- end }}
+            {{- range $configmap := .Values.configmaps }}
+              {{- if $configmap.mountPath }}
+                {{- if $configmap.keys }}
+                  {{- range $key := $configmap.keys }}
+            - name: {{ include "apache-nifi.fullname" $ }}-{{ $configmap.name }}
+              mountPath: {{ $configmap.mountPath }}/{{ $key }}
+              subPath: {{ $key }}
+              readOnly: true
+                  {{- end }}
+                {{- else }}
+            - name: {{ include "apache-nifi.fullname" $ }}-{{ $configmap.name }}
+              mountPath: {{ $configmap.mountPath }}
+              readOnly: true
+                {{- end }}
+              {{- end }}
+            {{- end }}
+            - name: "tls"
+              mountPath: /opt/nifi/nifi-current/tls
+              readOnly: true
+      {{- with .Values.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
